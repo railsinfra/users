@@ -105,8 +105,9 @@ fn parse_forwarded_for(req: &Request<Body>) -> Option<Vec<IpAddr>> {
         if trimmed.is_empty() {
             continue;
         }
-        let ip = trimmed.parse::<IpAddr>().ok()?;
-        ips.push(ip);
+        if let Ok(ip) = trimmed.parse::<IpAddr>() {
+            ips.push(ip);
+        }
     }
     if ips.is_empty() {
         return None;
