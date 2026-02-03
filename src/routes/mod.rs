@@ -6,8 +6,7 @@ pub mod health;
 pub mod password_reset;
 pub mod beta;
 
-#[path = "../../../src/rate_limit.rs"]
-mod shared_rate_limit;
+mod rate_limit;
 
 use axum::{Router, routing::{post, get}};
 use axum::body::Body;
@@ -18,7 +17,7 @@ use crate::db::Db;
 use crate::grpc::GrpcClients;
 use crate::error::AppError;
 use crate::email::EmailService;
-use shared_rate_limit::{extract_client_key, RateLimitConfig, RateLimiter};
+use rate_limit::{extract_client_key, RateLimitConfig, RateLimiter};
 use uuid::Uuid;
 use std::sync::OnceLock;
 use std::time::Duration;
