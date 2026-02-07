@@ -17,14 +17,14 @@ pub struct RegisterBusinessRequest {
     pub admin_password: String
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct RegisterBusinessResponse {
     pub business_id: Uuid,
     pub admin_user_id: Uuid,
     pub environments: Vec<EnvironmentInfo>
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EnvironmentInfo {
     pub id: Uuid,
     pub r#type: String
