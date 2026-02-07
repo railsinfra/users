@@ -1,6 +1,14 @@
 use thiserror::Error;
 use axum::{http::StatusCode, response::{IntoResponse, Response}};
 
+/// User-facing message when duplicate email registration is attempted.
+pub const DUPLICATE_EMAIL_MESSAGE: &str =
+    "An account with this email already exists. Try signing in or resetting your password.";
+
+/// User-facing message when duplicate beta application is attempted.
+pub const DUPLICATE_BETA_EMAIL_MESSAGE: &str =
+    "An application with this email has already been submitted. We'll be in touch shortly.";
+
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("Unauthorized")] 
@@ -13,6 +21,8 @@ pub enum AppError {
     TooManyRequests,
     #[error("Bad request: {0}")]
     BadRequest(String),
+    #[error("Conflict: {0}")]
+    Conflict(String),
     #[error("Internal server error")]
     Internal,
 }
@@ -25,6 +35,7 @@ impl IntoResponse for AppError {
             AppError::UnrecognizedSource => (StatusCode::FORBIDDEN, "unrecognized_source", None, true), // Security issue
             AppError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "rate_limited", None, false),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "bad_request", Some(msg.clone()), false),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict", Some(msg.clone()), false),
             AppError::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "internal", None, true), // Always report internal errors
         };
         

@@ -2,8 +2,8 @@ use axum::{Json, extract::State};
 use argon2::password_hash::rand_core::OsRng;
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::engine::Engine;
-use crate::{error::AppError};
-use crate::routes::AppState;
+use crate::error::AppError;
+use crate::routes::{AppState, user};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
@@ -61,11 +61,12 @@ pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>
 ) -> Result<Json<LoginResponse>, AppError> {
+    let email_normalized = user::normalize_email(&payload.email);
     // Optimized: Get active users with their environment_ids and business_id in one query
     let user_rows = sqlx::query(
         "SELECT id, password_hash, status, environment_id, business_id FROM users WHERE email = $1 AND status = 'active'"
     )
-    .bind(&payload.email)
+    .bind(&email_normalized)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {

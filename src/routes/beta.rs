@@ -4,7 +4,8 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{error::AppError, routes::AppState};
+use crate::error::{AppError, DUPLICATE_BETA_EMAIL_MESSAGE};
+use crate::routes::{user, AppState};
 
 #[derive(Deserialize)]
 pub struct BetaApplicationRequest {
@@ -52,6 +53,22 @@ pub async fn apply_for_beta(
     Json(payload): Json<BetaApplicationRequest>,
 ) -> Result<Json<BetaApplicationResponse>, AppError> {
     let input = normalize_payload(payload)?;
+    let email_normalized = user::normalize_email(&input.email);
+    if email_normalized.is_empty() {
+        return Err(AppError::BadRequest("Email is required.".to_string()));
+    }
+
+    // Application-level duplicate check (defense in depth with DB constraint)
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM beta_applications WHERE LOWER(TRIM(email)) = $1)"
+    )
+    .bind(&email_normalized)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| AppError::Internal)?;
+    if exists {
+        return Err(AppError::Conflict(DUPLICATE_BETA_EMAIL_MESSAGE.to_string()));
+    }
 
     let application_id = Uuid::new_v4();
 
@@ -60,19 +77,25 @@ pub async fn apply_for_beta(
     )
     .bind(application_id)
     .bind(&input.name)
-    .bind(&input.email)
+    .bind(&email_normalized)
     .bind(&input.company)
     .bind(&input.use_case)
     .execute(&state.db)
     .await
     .map_err(|error| {
+        if let Some(db_err) = error.as_database_error() {
+            let msg = db_err.message();
+            if msg.contains("duplicate key") || msg.contains("idx_beta_applications_email_normalized") || msg.contains("unique constraint") {
+                return AppError::Conflict(DUPLICATE_BETA_EMAIL_MESSAGE.to_string());
+            }
+        }
         tracing::error!("Failed to insert beta application: {}", error);
         AppError::Internal
     })?;
 
     if let Some(email_service) = &state.email {
         if let Err(error) = email_service
-            .send_beta_application(&input.name, &input.email, &input.company, &input.use_case)
+            .send_beta_application(&input.name, &email_normalized, &input.company, &input.use_case)
             .await
         {
             tracing::error!("Failed to send beta application email: {}", error);

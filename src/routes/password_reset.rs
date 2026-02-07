@@ -12,7 +12,8 @@ use sha2::{Sha256, Digest};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_ENGINE;
 use base64::Engine;
 
-use crate::{error::AppError, routes::AppState};
+use crate::error::AppError;
+use crate::routes::{AppState, user};
 
 #[derive(Deserialize)]
 pub struct RequestPasswordResetRequest {
@@ -45,11 +46,12 @@ pub async fn request_password_reset(
     // Always return success to prevent user enumeration
     // This is a security best practice
     
-    // Find user by email (only active users)
+    // Find user by email (only active users); normalize for case-insensitive lookup
+    let email_normalized = user::normalize_email(&payload.email);
     let user_row = sqlx::query(
         "SELECT id FROM users WHERE email = $1 AND status = 'active' LIMIT 1"
     )
-    .bind(&payload.email)
+    .bind(&email_normalized)
     .fetch_optional(&state.db)
     .await
     .map_err(|_| AppError::Internal)?;

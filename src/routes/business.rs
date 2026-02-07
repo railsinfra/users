@@ -1,8 +1,8 @@
 use axum::{Json, extract::State};
 use uuid::Uuid;
 use chrono::Utc;
-use crate::{error::AppError};
-use crate::routes::AppState;
+use crate::error::{AppError, DUPLICATE_EMAIL_MESSAGE};
+use crate::routes::{AppState, user};
 use serde::{Deserialize, Serialize};
 use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
@@ -34,6 +34,23 @@ pub async fn register_business(
     State(state): State<AppState>,
     Json(payload): Json<RegisterBusinessRequest>
 ) -> Result<Json<RegisterBusinessResponse>, AppError> {
+    let admin_email_normalized = user::normalize_email(&payload.admin_email);
+    if admin_email_normalized.is_empty() {
+        return Err(AppError::BadRequest("Admin email is required.".to_string()));
+    }
+
+    // Application-level check before insert (defense in depth with DB constraint)
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)"
+    )
+    .bind(&admin_email_normalized)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| AppError::Internal)?;
+    if exists {
+        return Err(AppError::Conflict(DUPLICATE_EMAIL_MESSAGE.to_string()));
+    }
+
     let mut tx = state.db.begin().await.map_err(|_| AppError::Internal)?;
 
     // 1. Create business
@@ -82,7 +99,7 @@ pub async fn register_business(
     .bind(&sandbox_env_id)
     .bind(&payload.admin_first_name)
     .bind(&payload.admin_last_name)
-    .bind(&payload.admin_email)
+    .bind(&admin_email_normalized)
     .bind(&password_hash)
     .bind(&now)
     .execute(&mut *tx)
@@ -90,7 +107,7 @@ pub async fn register_business(
     .map_err(|e| {
         if let Some(db_err) = e.as_database_error() {
             if db_err.message().contains("unique_email") {
-                return AppError::BadRequest("Email already exists".to_string());
+                return AppError::Conflict(DUPLICATE_EMAIL_MESSAGE.to_string());
             }
         }
         AppError::Internal
@@ -106,4 +123,118 @@ pub async fn register_business(
             EnvironmentInfo { id: prod_env_id, r#type: "production".to_string() },
         ],
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::DUPLICATE_EMAIL_MESSAGE;
+    use crate::grpc::GrpcClients;
+    use sqlx::postgres::PgPoolOptions;
+
+    async fn test_pool() -> Option<sqlx::PgPool> {
+        let database_url = std::env::var("DATABASE_URL").ok()?;
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&database_url)
+            .await
+            .ok()?;
+        sqlx::migrate!("./migrations").run(&pool).await.ok()?;
+        Some(pool)
+    }
+
+    fn unique_business_payload(admin_email: &str) -> RegisterBusinessRequest {
+        RegisterBusinessRequest {
+            name: format!("Biz {}", Uuid::new_v4()),
+            website: None,
+            admin_first_name: "Admin".to_string(),
+            admin_last_name: "User".to_string(),
+            admin_email: admin_email.to_string(),
+            admin_password: "password123!".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn register_business_with_unique_email_succeeds() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => {
+                eprintln!("DATABASE_URL not set; skipping register_business integration test.");
+                return;
+            }
+        };
+        let state = AppState {
+            db: pool.clone(),
+            grpc: GrpcClients {
+                accounts_client: None,
+            },
+            email: None,
+        };
+        let email = format!("unique+{}@example.com", Uuid::new_v4());
+        let payload = unique_business_payload(&email);
+        let result = register_business(State(state), Json(payload)).await;
+        assert!(result.is_ok(), "Unique email registration should succeed: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn register_business_duplicate_email_fails_with_conflict() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => {
+                eprintln!("DATABASE_URL not set; skipping duplicate email integration test.");
+                return;
+            }
+        };
+        let email = format!("dup+{}@example.com", Uuid::new_v4());
+        let payload1 = unique_business_payload(&email);
+        let state1 = AppState {
+            db: pool.clone(),
+            grpc: GrpcClients { accounts_client: None },
+            email: None,
+        };
+        let _ = register_business(State(state1), Json(payload1)).await.expect("first register must succeed");
+        let payload2 = unique_business_payload(&email);
+        let state2 = AppState {
+            db: pool.clone(),
+            grpc: GrpcClients { accounts_client: None },
+            email: None,
+        };
+        let result = register_business(State(state2), Json(payload2)).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        if let AppError::Conflict(msg) = err {
+            assert_eq!(msg, DUPLICATE_EMAIL_MESSAGE, "Error message should be stable and user-friendly");
+        } else {
+            panic!("Expected Conflict, got {:?}", err);
+        }
+    }
+
+    #[tokio::test]
+    async fn register_business_case_insensitive_duplicate_blocked() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => {
+                eprintln!("DATABASE_URL not set; skipping case-insensitive duplicate test.");
+                return;
+            }
+        };
+        let base = format!("case+{}@example.com", Uuid::new_v4());
+        let payload1 = unique_business_payload(&base);
+        let state1 = AppState {
+            db: pool.clone(),
+            grpc: GrpcClients { accounts_client: None },
+            email: None,
+        };
+        let _ = register_business(State(state1), Json(payload1)).await.expect("first register must succeed");
+        let payload2 = unique_business_payload(&base.to_uppercase());
+        let state2 = AppState {
+            db: pool.clone(),
+            grpc: GrpcClients { accounts_client: None },
+            email: None,
+        };
+        let result = register_business(State(state2), Json(payload2)).await;
+        assert!(result.is_err(), "Case-insensitive duplicate should be blocked");
+        let err = result.unwrap_err();
+        assert!(matches!(err, AppError::Conflict(_)), "Expected Conflict for case variant: {:?}", err);
+    }
 }

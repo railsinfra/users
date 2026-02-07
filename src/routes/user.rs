@@ -1,6 +1,6 @@
 use axum::{Json, extract::{State, Query}, http::HeaderMap};
 use uuid::Uuid;
-use crate::{error::AppError};
+use crate::error::{AppError, DUPLICATE_EMAIL_MESSAGE};
 use crate::routes::AppState;
 use crate::auth::AuthContext;
 use serde::{Deserialize, Serialize};
@@ -191,11 +191,33 @@ pub async fn me(
     }))
 }
 
+/// Normalize email for storage and lookup: trim and lowercase. Enforces single user per email (beta).
+pub(crate) fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
 pub async fn create_user(
     State(state): State<AppState>,
     ctx: AuthContext,
     Json(payload): Json<CreateUserRequest>
 ) -> Result<Json<CreateUserResponse>, AppError> {
+    let email_normalized = normalize_email(&payload.email);
+    if email_normalized.is_empty() {
+        return Err(AppError::BadRequest("Email is required.".to_string()));
+    }
+
+    // Application-level check before insert (defense in depth with DB constraint)
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)"
+    )
+    .bind(&email_normalized)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| AppError::Internal)?;
+    if exists {
+        return Err(AppError::Conflict(DUPLICATE_EMAIL_MESSAGE.to_string()));
+    }
+
     let user_id = Uuid::new_v4();
     let now = chrono::Utc::now();
     let salt = SaltString::generate(&mut OsRng);
@@ -248,7 +270,7 @@ pub async fn create_user(
     .bind(&environment_id)
     .bind(&payload.first_name)
     .bind(&payload.last_name)
-    .bind(&payload.email)
+    .bind(&email_normalized)
     .bind(&password_hash)
     .bind(&now)
     .bind(&created_by_user_id)
@@ -258,7 +280,7 @@ pub async fn create_user(
     .map_err(|e| {
         if let Some(db_err) = e.as_database_error() {
             if db_err.message().contains("unique_email") {
-                return AppError::BadRequest("Email already exists".to_string());
+                return AppError::Conflict(DUPLICATE_EMAIL_MESSAGE.to_string());
             }
         }
         AppError::Internal
@@ -468,7 +490,32 @@ fn list_users_queries(environment_type: Option<&str>) -> (&'static str, &'static
 
 #[cfg(test)]
 mod tests {
-    use super::list_users_queries;
+    use super::{list_users_queries, normalize_email};
+    use crate::error::DUPLICATE_EMAIL_MESSAGE;
+
+    #[test]
+    fn normalize_email_trims_and_lowercases() {
+        assert_eq!(normalize_email("  User@Email.com  "), "user@email.com");
+        assert_eq!(normalize_email("user@email.com"), "user@email.com");
+        assert_eq!(normalize_email("USER@EMAIL.COM"), "user@email.com");
+    }
+
+    #[test]
+    fn normalize_email_empty_after_trim() {
+        assert_eq!(normalize_email("   "), "");
+    }
+
+    #[test]
+    fn duplicate_email_message_is_user_friendly_and_stable() {
+        assert!(
+            DUPLICATE_EMAIL_MESSAGE.contains("account") && DUPLICATE_EMAIL_MESSAGE.contains("email"),
+            "Message should be non-technical and actionable"
+        );
+        assert!(
+            DUPLICATE_EMAIL_MESSAGE.contains("signing in") || DUPLICATE_EMAIL_MESSAGE.contains("reset"),
+            "Message should suggest sign in or password reset"
+        );
+    }
 
     #[test]
     fn list_users_queries_with_env_type_includes_environment_join() {
