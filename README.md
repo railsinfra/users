@@ -115,6 +115,7 @@ Notes:
 
 - API keys are **business-owned** and treated as **admin-level** for the MVP.
 - API keys are verified by hashing the provided key and matching it against the stored hash.
+- The hash uses `API_KEY_HASH_SECRET` (env var; default `dev_api_key_hash_secret` if unset). Use the **same** secret when creating and validating keys (e.g. same `.env` or `.env.dev` when running the service).
 
 ### API key creation and one-time reveal
 

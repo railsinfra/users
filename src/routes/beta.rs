@@ -182,6 +182,7 @@ mod tests {
         let config = Config {
             database_url: database_url.clone(),
             server_addr: "127.0.0.1:0".to_string(),
+            grpc_port: 50051,
             accounts_grpc_url: "http://localhost:50052".to_string(),
             sentry_dsn: None,
             environment: "test".to_string(),

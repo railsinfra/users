@@ -6,6 +6,7 @@ mod error;
 mod routes;
 mod auth;
 mod grpc;
+mod grpc_server;
 mod email;
 
 use tracing_subscriber::prelude::*;
@@ -13,6 +14,8 @@ use crate::routes::register_routes;
 use crate::email::EmailService;
 use axum::serve;
 use tokio::net::TcpListener;
+use tonic::transport::Server;
+use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -118,26 +121,46 @@ async fn main() -> anyhow::Result<()> {
     };
     
     let app = register_routes(db.clone(), grpc.clone(), email);
-    let addr: std::net::SocketAddr = config.server_addr.parse()
+    let addr: SocketAddr = config.server_addr.parse()
         .map_err(|e| anyhow::anyhow!("Failed to parse SERVER_ADDR '{}': {}", config.server_addr, e))?;
-    
-    tracing::info!("Binding to address {}...", addr);
+    let grpc_addr: SocketAddr = ([0, 0, 0, 0], config.grpc_port).into();
+
+    tracing::info!("Binding HTTP to {}...", addr);
     let listener = TcpListener::bind(&addr).await
         .map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", addr, e))?;
-    
-    tracing::info!("🚀 Users service started successfully on http://{}", addr);
+
+    let grpc_svc = grpc_server::UsersGrpcService::new(db.clone()).into_server();
+
+    let http_task = async move {
+        serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .map_err(|e| anyhow::anyhow!("HTTP server error: {}", e))
+    };
+
+    let grpc_task = async move {
+        Server::builder()
+            .add_service(grpc_svc)
+            .serve(grpc_addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("gRPC server error: {}", e))
+    };
+
+    tracing::info!("🚀 Users service started successfully");
+    tracing::info!("  HTTP: http://{}", addr);
+    tracing::info!("  gRPC: {}", grpc_addr);
     tracing::info!("Available endpoints:");
     tracing::info!("  GET  /health");
     tracing::info!("  POST /api/v1/business/register");
-    tracing::info!("  POST /api/v1/users");
+    tracing::info!("  POST /api/v1/users (SDK-only: X-API-Key + X-Environment)");
+    tracing::info!("  GET  /api/v1/users (SDK-only: X-API-Key + X-Environment)");
     tracing::info!("  POST /api/v1/auth/login");
     tracing::info!("  POST /api/v1/auth/refresh");
     tracing::info!("  POST /api/v1/auth/revoke");
     tracing::info!("  POST /api/v1/beta/apply");
     tracing::info!("  POST /api/v1/auth/password-reset/request");
     tracing::info!("  POST /api/v1/auth/password-reset/reset");
-    
-    serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
+
+    tokio::try_join!(http_task, grpc_task)?;
     Ok(())
 }
 

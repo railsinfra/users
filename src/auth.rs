@@ -24,6 +24,14 @@ pub struct AuthContext {
     pub environment_id: Uuid,
 }
 
+/// SDK-only auth: API key + X-Environment. No JWT. Use for routes called exclusively by SDKs (e.g. POST/GET /api/v1/users).
+#[derive(Clone, Debug)]
+pub struct ApiKeyOnlyContext {
+    pub api_key_id: Uuid,
+    pub business_id: Uuid,
+    pub environment_id: Uuid,
+}
+
 #[derive(Debug, Deserialize)]
 struct JwtClaims {
     sub: String,
@@ -208,6 +216,125 @@ impl FromRequestParts<AppState> for AuthContext {
         Ok(Self {
             user_id: Some(user_id),
             api_key_id: None,
+            business_id,
+            environment_id,
+        })
+    }
+}
+
+#[async_trait]
+impl FromRequestParts<AppState> for ApiKeyOnlyContext {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        // #region agent log
+        let has_api_key_header = parts.headers.get(API_KEY_HEADER).is_some();
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/sibabale.joja/projects/personal/rails/.cursor/debug.log") {
+            let _ = std::io::Write::write_fmt(&mut f, format_args!("{{\"location\":\"auth.rs:ApiKeyOnlyContext\",\"message\":\"entry\",\"data\":{{\"has_x_api_key_header\":{}}},\"timestamp\":{},\"hypothesisId\":\"C\"}}\n", has_api_key_header, chrono::Utc::now().timestamp_millis()));
+        }
+        // #endregion
+        let environment_id_from_uuid_header: Option<Uuid> = parts
+            .headers
+            .get(ENVIRONMENT_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(|raw| {
+                Uuid::parse_str(&raw)
+                    .map_err(|_| AppError::BadRequest(format!("Invalid {} header", ENVIRONMENT_ID_HEADER)))
+            })
+            .transpose()?;
+
+        let environment_from_string_header: Option<String> = parts
+            .headers
+            .get(ENVIRONMENT_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let api_key_plain = parts
+            .headers
+            .get(API_KEY_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or(AppError::Unauthorized)?;
+
+        let now = Utc::now();
+        let key_hash = hash_api_key(&api_key_plain)?;
+
+        let rec = sqlx::query(
+            "SELECT k.id, k.business_id, k.revoked_at, k.status FROM api_keys k WHERE k.key_hash = $1"
+        )
+        .bind(&key_hash)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| AppError::Internal)?;
+
+        // #region agent log
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/sibabale.joja/projects/personal/rails/.cursor/debug.log") {
+            let _ = std::io::Write::write_fmt(&mut f, format_args!("{{\"location\":\"auth.rs:ApiKeyOnlyContext\",\"message\":\"after DB lookup\",\"data\":{{\"key_found_in_db\":{}}},\"timestamp\":{},\"hypothesisId\":\"D\"}}\n", rec.is_some(), chrono::Utc::now().timestamp_millis()));
+        }
+        // #endregion
+
+        let rec = rec.ok_or(AppError::Unauthorized)?;
+
+        let api_key_id: Uuid = rec.try_get("id").map_err(|_| AppError::Internal)?;
+        let business_id: Uuid = rec.try_get("business_id").map_err(|_| AppError::Internal)?;
+        let status: String = rec.try_get("status").map_err(|_| AppError::Internal)?;
+        let revoked_at: Option<chrono::DateTime<Utc>> = rec.try_get("revoked_at").map_err(|_| AppError::Internal)?;
+
+        if status != "active" || revoked_at.is_some() {
+            return Err(AppError::Unauthorized);
+        }
+
+        let environment_id = if let Some(env_id) = environment_id_from_uuid_header {
+            env_id
+        } else {
+            let env = environment_from_string_header
+                .ok_or_else(|| AppError::BadRequest(format!("Missing {} header", ENVIRONMENT_HEADER)))?;
+
+            if env != "sandbox" && env != "production" {
+                return Err(AppError::BadRequest(format!(
+                    "Invalid {} header: must be 'sandbox' or 'production'",
+                    ENVIRONMENT_HEADER
+                )));
+            }
+
+            let env_rec = sqlx::query(
+                "SELECT id FROM environments WHERE business_id = $1 AND type = $2 AND status = 'active'"
+            )
+            .bind(&business_id)
+            .bind(&env)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| AppError::Internal)?
+            .ok_or_else(|| AppError::Forbidden)?;
+
+            env_rec.try_get("id").map_err(|_| AppError::Internal)?
+        };
+
+        let env_ok = sqlx::query(
+            "SELECT 1 FROM environments WHERE id = $1 AND business_id = $2 AND status = 'active'"
+        )
+        .bind(&environment_id)
+        .bind(&business_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| AppError::Internal)?;
+
+        if env_ok.is_none() {
+            return Err(AppError::Forbidden);
+        }
+
+        let _ = sqlx::query("UPDATE api_keys SET last_used_at = $1 WHERE id = $2")
+            .bind(&now)
+            .bind(&api_key_id)
+            .execute(&state.db)
+            .await;
+
+        Ok(Self {
+            api_key_id,
             business_id,
             environment_id,
         })

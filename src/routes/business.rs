@@ -1,11 +1,16 @@
 use axum::{Json, extract::State};
 use uuid::Uuid;
-use chrono::Utc;
+use chrono::{Utc, Duration};
 use crate::error::{AppError, DUPLICATE_EMAIL_MESSAGE};
 use crate::routes::{AppState, user};
 use serde::{Deserialize, Serialize};
 use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
+use argon2::password_hash::rand_core::RngCore;
+use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+use base64::engine::Engine;
+use jsonwebtoken::{encode, EncodingKey, Header};
+use serde_json::json;
 
 #[derive(Deserialize)]
 pub struct RegisterBusinessRequest {
@@ -21,7 +26,12 @@ pub struct RegisterBusinessRequest {
 pub struct RegisterBusinessResponse {
     pub business_id: Uuid,
     pub admin_user_id: Uuid,
-    pub environments: Vec<EnvironmentInfo>
+    pub environments: Vec<EnvironmentInfo>,
+    /// Session fields so frontend can auto-login (same shape as login response).
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: u64,
+    pub selected_environment_id: Uuid,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,13 +125,70 @@ pub async fn register_business(
 
     tx.commit().await.map_err(|_| AppError::Internal)?;
 
+    // Auto-login: create session and return tokens so frontend can redirect to dashboard (same shape as login).
+    let selected_environment_id = sandbox_env_id;
+    let jwt_id = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    let exp = now + Duration::minutes(15);
+    let claims = json!({
+        "sub": admin_user_id.to_string(),
+        "jti": jwt_id,
+        "exp": exp.timestamp(),
+        "iat": now.timestamp(),
+        "env": selected_environment_id.to_string(),
+        "business_id": business_id.to_string(),
+    });
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
+    let access_token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|_| AppError::Internal)?;
+
+    let mut refresh_bytes = [0u8; 32];
+    let mut rng = OsRng;
+    RngCore::fill_bytes(&mut rng, &mut refresh_bytes);
+    let refresh_token = BASE64_ENGINE.encode(refresh_bytes);
+    let refresh_id = Uuid::new_v4();
+    let refresh_exp = now + Duration::days(30);
+
+    sqlx::query(
+        "INSERT INTO user_sessions (id, user_id, environment_id, refresh_token, jwt_id, status, created_at, expires_at) VALUES ($1, $2, $3, $4, $5, 'active', $6, $7)",
+    )
+    .bind(&refresh_id)
+    .bind(&admin_user_id)
+    .bind(&selected_environment_id)
+    .bind(&refresh_token)
+    .bind(&jwt_id)
+    .bind(&now)
+    .bind(&refresh_exp)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error in register (session insert): {}", e);
+        AppError::Internal
+    })?;
+
+    let environments = vec![
+        EnvironmentInfo {
+            id: sandbox_env_id,
+            r#type: "sandbox".to_string(),
+        },
+        EnvironmentInfo {
+            id: prod_env_id,
+            r#type: "production".to_string(),
+        },
+    ];
+
     Ok(Json(RegisterBusinessResponse {
         business_id,
         admin_user_id,
-        environments: vec![
-            EnvironmentInfo { id: sandbox_env_id, r#type: "sandbox".to_string() },
-            EnvironmentInfo { id: prod_env_id, r#type: "production".to_string() },
-        ],
+        environments,
+        access_token,
+        refresh_token,
+        expires_in: 900,
+        selected_environment_id,
     }))
 }
 

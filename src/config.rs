@@ -2,6 +2,7 @@
 pub struct Config {
     pub database_url: String,
     pub server_addr: String,
+    pub grpc_port: u16,
     pub accounts_grpc_url: String,
     pub sentry_dsn: Option<String>,
     pub environment: String,
@@ -33,6 +34,11 @@ pub fn load() -> Result<Config, anyhow::Error> {
         std::env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string())
     };
 
+    let grpc_port = std::env::var("GRPC_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(50051);
+
     let accounts_grpc_url = std::env::var("ACCOUNTS_GRPC_URL")
         .unwrap_or_else(|_| "http://localhost:50052".to_string());
     
@@ -55,6 +61,7 @@ pub fn load() -> Result<Config, anyhow::Error> {
     Ok(Config {
         database_url,
         server_addr,
+        grpc_port,
         accounts_grpc_url,
         sentry_dsn,
         environment,
