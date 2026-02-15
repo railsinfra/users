@@ -26,6 +26,8 @@ pub struct MeUser {
 #[derive(Serialize)]
 pub struct MeBusiness {
     pub id: Uuid,
+    /// Canonical org identifier for Accounts/Ledger; equals business id.
+    pub organization_id: Uuid,
     pub name: String,
     pub website: Option<String>,
     pub status: String,
@@ -134,8 +136,10 @@ pub async fn me(
     .map_err(|_| AppError::Internal)?
     .ok_or(AppError::BadRequest("Invalid business_id".to_string()))?;
 
+    let business_id: Uuid = business_row.get("id");
     let business = MeBusiness {
-        id: business_row.get("id"),
+        id: business_id,
+        organization_id: business_id,
         name: business_row.get("name"),
         website: business_row.get("website"),
         status: business_row.get("status"),

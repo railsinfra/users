@@ -8,7 +8,7 @@ pub async fn init(database_url: &str) -> Result<Db, sqlx::Error> {
     // For Supabase/Neon, use the pooler URL (ends with -pooler) for better performance
     PgPoolOptions::new()
         .max_connections(5) // Sufficient for single user
-        .acquire_timeout(std::time::Duration::from_secs(30))
+        .acquire_timeout(std::time::Duration::from_secs(60)) // Allow Neon cold start (~30s)
         .idle_timeout(std::time::Duration::from_secs(600)) // 10 minutes
         .max_lifetime(std::time::Duration::from_secs(1800)) // 30 minutes
         .test_before_acquire(false)
