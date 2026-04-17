@@ -73,7 +73,7 @@ impl FromRequestParts<AppState> for AuthContext {
             .filter(|s| !s.is_empty())
         {
             let now = Utc::now();
-            let key_hash = hash_api_key(&api_key_plain)?;
+            let key_hash = hash_api_key(&api_key_plain, &state.api_key_hash_secret)?;
 
             let rec = sqlx::query(
                 "SELECT k.id, k.business_id, k.revoked_at, k.status FROM api_keys k WHERE k.key_hash = $1"
@@ -159,10 +159,9 @@ impl FromRequestParts<AppState> for AuthContext {
             .strip_prefix("Bearer ")
             .ok_or(AppError::Unauthorized)?;
 
-        let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
         let decoded = decode::<JwtClaims>(
             token,
-            &DecodingKey::from_secret(secret.as_bytes()),
+            &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
             &Validation::default(),
         )
         .map_err(|_| AppError::Unauthorized)?;
@@ -227,12 +226,6 @@ impl FromRequestParts<AppState> for ApiKeyOnlyContext {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        // #region agent log
-        let has_api_key_header = parts.headers.get(API_KEY_HEADER).is_some();
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/sibabale.joja/projects/personal/rails/.cursor/debug.log") {
-            let _ = std::io::Write::write_fmt(&mut f, format_args!("{{\"location\":\"auth.rs:ApiKeyOnlyContext\",\"message\":\"entry\",\"data\":{{\"has_x_api_key_header\":{}}},\"timestamp\":{},\"hypothesisId\":\"C\"}}\n", has_api_key_header, chrono::Utc::now().timestamp_millis()));
-        }
-        // #endregion
         let environment_id_from_uuid_header: Option<Uuid> = parts
             .headers
             .get(ENVIRONMENT_ID_HEADER)
@@ -261,7 +254,7 @@ impl FromRequestParts<AppState> for ApiKeyOnlyContext {
             .ok_or(AppError::Unauthorized)?;
 
         let now = Utc::now();
-        let key_hash = hash_api_key(&api_key_plain)?;
+        let key_hash = hash_api_key(&api_key_plain, &state.api_key_hash_secret)?;
 
         let rec = sqlx::query(
             "SELECT k.id, k.business_id, k.revoked_at, k.status FROM api_keys k WHERE k.key_hash = $1"
@@ -270,12 +263,6 @@ impl FromRequestParts<AppState> for ApiKeyOnlyContext {
         .fetch_optional(&state.db)
         .await
         .map_err(|_| AppError::Internal)?;
-
-        // #region agent log
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/sibabale.joja/projects/personal/rails/.cursor/debug.log") {
-            let _ = std::io::Write::write_fmt(&mut f, format_args!("{{\"location\":\"auth.rs:ApiKeyOnlyContext\",\"message\":\"after DB lookup\",\"data\":{{\"key_found_in_db\":{}}},\"timestamp\":{},\"hypothesisId\":\"D\"}}\n", rec.is_some(), chrono::Utc::now().timestamp_millis()));
-        }
-        // #endregion
 
         let rec = rec.ok_or(AppError::Unauthorized)?;
 
@@ -341,9 +328,7 @@ impl FromRequestParts<AppState> for ApiKeyOnlyContext {
     }
 }
 
-pub(crate) fn hash_api_key(api_key_plain: &str) -> Result<String, AppError> {
-    let secret = std::env::var("API_KEY_HASH_SECRET")
-        .unwrap_or_else(|_| "dev_api_key_hash_secret".to_string());
+pub(crate) fn hash_api_key(api_key_plain: &str, secret: &str) -> Result<String, AppError> {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).map_err(|_| AppError::Internal)?;
     mac.update(api_key_plain.as_bytes());
     let out = mac.finalize().into_bytes();

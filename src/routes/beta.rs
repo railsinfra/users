@@ -115,6 +115,7 @@ mod tests {
     use crate::config::Config;
     use crate::email::EmailService;
     use crate::grpc::GrpcClients;
+    use crate::routes::test_crypto_secrets;
     use httpmock::Method::POST;
     use httpmock::MockServer;
     use sqlx::postgres::PgPoolOptions;
@@ -195,12 +196,15 @@ mod tests {
         };
 
         let email_service = EmailService::new(&config);
+        let (jwt_secret, api_key_hash_secret) = test_crypto_secrets();
         let state = AppState {
             db: pool.clone(),
             grpc: GrpcClients {
                 accounts_client: None,
             },
             email: Some(email_service),
+            jwt_secret,
+            api_key_hash_secret,
         };
 
         let applicant_email = format!("beta+{}@example.com", Uuid::new_v4());
@@ -253,12 +257,15 @@ mod tests {
             .await
             .expect("Failed to run migrations");
 
+        let (jwt_secret, api_key_hash_secret) = test_crypto_secrets();
         let state = AppState {
             db: pool.clone(),
             grpc: GrpcClients {
                 accounts_client: None,
             },
             email: None,
+            jwt_secret,
+            api_key_hash_secret,
         };
 
         let applicant_email = format!("beta+{}@example.com", Uuid::new_v4());

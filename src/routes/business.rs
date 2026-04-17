@@ -138,11 +138,10 @@ pub async fn register_business(
         "env": selected_environment_id.to_string(),
         "business_id": business_id.to_string(),
     });
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
     let access_token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
+        &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
     )
     .map_err(|_| AppError::Internal)?;
 
@@ -197,6 +196,7 @@ mod tests {
     use super::*;
     use crate::error::DUPLICATE_EMAIL_MESSAGE;
     use crate::grpc::GrpcClients;
+    use crate::routes::test_crypto_secrets;
     use sqlx::postgres::PgPoolOptions;
 
     async fn test_pool() -> Option<sqlx::PgPool> {
@@ -230,12 +230,15 @@ mod tests {
                 return;
             }
         };
+        let (jwt_secret, api_key_hash_secret) = test_crypto_secrets();
         let state = AppState {
             db: pool.clone(),
             grpc: GrpcClients {
                 accounts_client: None,
             },
             email: None,
+            jwt_secret,
+            api_key_hash_secret,
         };
         let email = format!("unique+{}@example.com", Uuid::new_v4());
         let payload = unique_business_payload(&email);
@@ -254,10 +257,13 @@ mod tests {
         };
         let email = format!("dup+{}@example.com", Uuid::new_v4());
         let payload1 = unique_business_payload(&email);
+        let (jwt_secret, api_key_hash_secret) = test_crypto_secrets();
         let state1 = AppState {
             db: pool.clone(),
             grpc: GrpcClients { accounts_client: None },
             email: None,
+            jwt_secret: jwt_secret.clone(),
+            api_key_hash_secret: api_key_hash_secret.clone(),
         };
         let _ = register_business(State(state1), Json(payload1)).await.expect("first register must succeed");
         let payload2 = unique_business_payload(&email);
@@ -265,6 +271,8 @@ mod tests {
             db: pool.clone(),
             grpc: GrpcClients { accounts_client: None },
             email: None,
+            jwt_secret,
+            api_key_hash_secret,
         };
         let result = register_business(State(state2), Json(payload2)).await;
         assert!(result.is_err());
@@ -287,10 +295,13 @@ mod tests {
         };
         let base = format!("case+{}@example.com", Uuid::new_v4());
         let payload1 = unique_business_payload(&base);
+        let (jwt_secret, api_key_hash_secret) = test_crypto_secrets();
         let state1 = AppState {
             db: pool.clone(),
             grpc: GrpcClients { accounts_client: None },
             email: None,
+            jwt_secret: jwt_secret.clone(),
+            api_key_hash_secret: api_key_hash_secret.clone(),
         };
         let _ = register_business(State(state1), Json(payload1)).await.expect("first register must succeed");
         let payload2 = unique_business_payload(&base.to_uppercase());
@@ -298,6 +309,8 @@ mod tests {
             db: pool.clone(),
             grpc: GrpcClients { accounts_client: None },
             email: None,
+            jwt_secret,
+            api_key_hash_secret,
         };
         let result = register_business(State(state2), Json(payload2)).await;
         assert!(result.is_err(), "Case-insensitive duplicate should be blocked");

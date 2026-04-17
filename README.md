@@ -59,13 +59,12 @@ export DATABASE_URL="postgresql://localhost:5432/users"
 export SERVER_ADDR="0.0.0.0:8080"
 export RUST_LOG="info"
 
-# API key hashing secret (required in production)
-export API_KEY_HASH_SECRET="replace_me"
+# Required at startup (no insecure defaults). Use long random values, e.g. openssl rand -hex 32
+export JWT_SECRET="replace_me"
+export API_KEY_HASH_SECRET="replace_me_different_from_jwt"
 
-# Service-to-service protection (recommended)
-# Only required for the sensitive endpoints:
-# - POST /api/v1/auth/login
-# - POST /api/v1/business/register
+# Service-to-service protection for login and business register.
+# In ENVIRONMENT=production this MUST be set (non-empty) or the process will exit at startup.
 # Comma-separated list of allowed internal tokens.
 export INTERNAL_SERVICE_TOKEN_ALLOWLIST="replace_me"
 ```
@@ -125,7 +124,7 @@ Notes:
 
 - API keys are **business-owned** and treated as **admin-level** for the platform.
 - API keys are verified by hashing the provided key and matching it against the stored hash.
-- The hash uses `API_KEY_HASH_SECRET` (env var; default `dev_api_key_hash_secret` if unset). Use the **same** secret when creating and validating keys (e.g. same `.env` or `.env.dev` when running the service).
+- The hash uses `API_KEY_HASH_SECRET` from the environment (required at startup). Use the **same** value for every replica of the service that validates keys.
 
 ### API key creation and one-time reveal
 

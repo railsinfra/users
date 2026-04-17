@@ -2,6 +2,7 @@
 
 use crate::auth;
 use sqlx::{PgPool, Row};
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
@@ -15,11 +16,15 @@ use proto::{ValidateApiKeyRequest, ValidateApiKeyResponse};
 #[derive(Clone)]
 pub struct UsersGrpcService {
     pool: PgPool,
+    api_key_hash_secret: Arc<str>,
 }
 
 impl UsersGrpcService {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, api_key_hash_secret: Arc<str>) -> Self {
+        Self {
+            pool,
+            api_key_hash_secret,
+        }
     }
 
     pub fn into_server(self) -> UsersServiceServer<Self> {
@@ -46,7 +51,8 @@ impl UsersServiceTrait for UsersGrpcService {
             ));
         }
 
-        let key_hash = auth::hash_api_key(api_key_plain).map_err(|e| Status::internal(e.to_string()))?;
+        let key_hash = auth::hash_api_key(api_key_plain, &self.api_key_hash_secret)
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         let rec = sqlx::query(
             "SELECT k.id, k.business_id, k.revoked_at, k.status FROM api_keys k WHERE k.key_hash = $1",

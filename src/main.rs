@@ -16,6 +16,7 @@ use axum::serve;
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -119,8 +120,44 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Resend API key not configured. Password reset emails will not be sent.");
         None
     };
-    
-    let app = register_routes(db.clone(), grpc.clone(), email);
+
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .map_err(|_| anyhow::anyhow!(
+            "JWT_SECRET is required. Set a long random value (for example `openssl rand -hex 32`). See .env.dev.example."
+        ))?;
+    let jwt_secret = jwt_secret.trim();
+    if jwt_secret.is_empty() {
+        return Err(anyhow::anyhow!("JWT_SECRET must not be empty."));
+    }
+    let jwt_secret: Arc<str> = Arc::from(jwt_secret.to_string());
+
+    let api_key_hash_secret = std::env::var("API_KEY_HASH_SECRET")
+        .map_err(|_| anyhow::anyhow!(
+            "API_KEY_HASH_SECRET is required. Set a long random value distinct from JWT_SECRET. See .env.dev.example."
+        ))?;
+    let api_key_hash_secret = api_key_hash_secret.trim();
+    if api_key_hash_secret.is_empty() {
+        return Err(anyhow::anyhow!("API_KEY_HASH_SECRET must not be empty."));
+    }
+    let api_key_hash_secret: Arc<str> = Arc::from(api_key_hash_secret.to_string());
+
+    if config.environment == "production" {
+        let allow = std::env::var("INTERNAL_SERVICE_TOKEN_ALLOWLIST").unwrap_or_default();
+        if allow.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "INTERNAL_SERVICE_TOKEN_ALLOWLIST must be set in production to protect \
+                 /api/v1/auth/login and /api/v1/business/register (comma-separated tokens)."
+            ));
+        }
+    }
+
+    let app = register_routes(
+        db.clone(),
+        grpc.clone(),
+        email,
+        jwt_secret.clone(),
+        api_key_hash_secret.clone(),
+    );
     let addr: SocketAddr = config.server_addr.parse()
         .map_err(|e| anyhow::anyhow!("Failed to parse SERVER_ADDR '{}': {}", config.server_addr, e))?;
     let grpc_addr: SocketAddr = ([0, 0, 0, 0], config.grpc_port).into();
@@ -129,7 +166,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&addr).await
         .map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", addr, e))?;
 
-    let grpc_svc = grpc_server::UsersGrpcService::new(db.clone()).into_server();
+    let grpc_svc = grpc_server::UsersGrpcService::new(db.clone(), api_key_hash_secret).into_server();
 
     let http_task = async move {
         serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())

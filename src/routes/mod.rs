@@ -19,7 +19,7 @@ use crate::error::AppError;
 use crate::email::EmailService;
 use rate_limit::{extract_client_key, RateLimitConfig, RateLimiter};
 use uuid::Uuid;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -27,10 +27,34 @@ pub struct AppState {
     pub db: Db,
     pub grpc: GrpcClients,
     pub email: Option<EmailService>,
+    /// JWT signing/verification secret (never log).
+    pub jwt_secret: Arc<str>,
+    /// HMAC secret for API key hashing (never log).
+    pub api_key_hash_secret: Arc<str>,
 }
 
-pub fn register_routes(db: Db, grpc: GrpcClients, email: Option<EmailService>) -> Router {
-    let state = AppState { db, grpc, email };
+#[cfg(test)]
+pub(crate) fn test_crypto_secrets() -> (Arc<str>, Arc<str>) {
+    (
+        Arc::from("test_jwt_secret_for_unit_tests_only_min_length_32"),
+        Arc::from("test_api_key_hash_secret_for_unit_tests_only_32"),
+    )
+}
+
+pub fn register_routes(
+    db: Db,
+    grpc: GrpcClients,
+    email: Option<EmailService>,
+    jwt_secret: Arc<str>,
+    api_key_hash_secret: Arc<str>,
+) -> Router {
+    let state = AppState {
+        db,
+        grpc,
+        email,
+        jwt_secret,
+        api_key_hash_secret,
+    };
     let public = Router::new()
         .route("/health", get(health::health_check))
         .route("/api/v1/business/register", post(business::register_business))

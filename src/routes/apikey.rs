@@ -2,7 +2,7 @@ use axum::{Json, extract::State, extract::Path};
 use uuid::Uuid;
 use crate::{error::AppError};
 use crate::routes::AppState;
-use crate::auth::{AuthContext, hash_api_key};
+use crate::auth::{hash_api_key, AuthContext};
 use serde::{Deserialize, Serialize};
 use chrono::Utc;
 use sqlx::Row;
@@ -77,7 +77,7 @@ pub async fn create_api_key(
     rng.try_fill_bytes(&mut raw)
         .map_err(|_| AppError::Internal)?;
     let api_key_plain = BASE64_URL_ENGINE.encode(raw);
-    let key_hash = hash_api_key(&api_key_plain)?;
+    let key_hash = hash_api_key(&api_key_plain, &state.api_key_hash_secret)?;
 
     sqlx::query(
         "INSERT INTO api_keys (id, business_id, environment_id, key_hash, status, last_used_at, created_at, revoked_at, created_by_user_id) VALUES ($1, $2, $3, $4, 'active', NULL, $5, NULL, $6)"

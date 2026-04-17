@@ -165,8 +165,11 @@ pub async fn login(
         "env": selected_environment_id.to_string(),
         "business_id": business_id.to_string(),
     });
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
-    let access_token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+    let access_token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
+    )
         .map_err(|_| AppError::Internal)?;
 
     // 4. Generate refresh token
@@ -250,8 +253,11 @@ pub async fn refresh_token(
         "env": environment_id.to_string(),
         "business_id": business_id.to_string(),
     });
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
-    let access_token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+    let access_token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
+    )
         .map_err(|_| AppError::Internal)?;
 
     // 3. Issue new refresh token and update session
