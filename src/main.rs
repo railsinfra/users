@@ -45,6 +45,14 @@ async fn main() -> anyhow::Result<()> {
                 release: sentry::release_name!(),
                 environment: Some(config.environment.clone().into()),
                 traces_sample_rate: 0.1, // Sample 10% of transactions (tune per environment)
+                before_send: Some(std::sync::Arc::new(|mut event| {
+                    if let Some(ref mut req) = event.request {
+                        req.headers.remove("Authorization");
+                        req.headers.remove("X-Internal-Service-Token");
+                        req.headers.remove("X-API-Key");
+                    }
+                    Some(event)
+                })),
                 ..Default::default()
             },
         )))
