@@ -5,16 +5,17 @@ use base64::engine::Engine;
 use crate::error::AppError;
 use crate::routes::{AppState, user};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use sqlx::Row;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
     pub environment_id: Option<Uuid>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct LoginResponse {
     pub access_token: String,
     pub refresh_token: String,
@@ -23,30 +24,30 @@ pub struct LoginResponse {
     pub environments: Vec<EnvironmentInfo>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct EnvironmentInfo {
     pub id: Uuid,
     pub r#type: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct RefreshTokenRequest {
     pub refresh_token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct RefreshTokenResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct RevokeTokenRequest {
     pub refresh_token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct RevokeTokenResponse {
     pub status: String,
 }

@@ -2,12 +2,13 @@
 
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::{AppError, DUPLICATE_BETA_EMAIL_MESSAGE};
 use crate::routes::{user, AppState};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct BetaApplicationRequest {
     pub name: String,
     pub email: String,
@@ -16,7 +17,7 @@ pub struct BetaApplicationRequest {
     pub use_case: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct BetaApplicationResponse {
     pub message: String,
 }

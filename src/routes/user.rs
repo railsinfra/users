@@ -4,6 +4,7 @@ use crate::error::AppError;
 use crate::routes::AppState;
 use crate::auth::AuthContext;
 use serde::Serialize;
+use utoipa::ToSchema;
 use sqlx::Row;
 
 /// Normalize email for storage and lookup: trim and lowercase.
@@ -11,7 +12,7 @@ pub(crate) fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct MeUser {
     pub id: Uuid,
     pub business_id: Uuid,
@@ -23,7 +24,7 @@ pub struct MeUser {
     pub status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct MeBusiness {
     pub id: Uuid,
     /// Canonical org identifier for Accounts/Ledger; equals business id.
@@ -33,7 +34,7 @@ pub struct MeBusiness {
     pub status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct MeEnvironment {
     pub id: Uuid,
     pub business_id: Uuid,
@@ -41,7 +42,7 @@ pub struct MeEnvironment {
     pub status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct MeResponse {
     pub user: MeUser,
     pub business: MeBusiness,

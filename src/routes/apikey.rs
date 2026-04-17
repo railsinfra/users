@@ -4,6 +4,7 @@ use crate::{error::AppError};
 use crate::routes::AppState;
 use crate::auth::{hash_api_key, AuthContext};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use chrono::Utc;
 use sqlx::Row;
 use rand::rngs::OsRng;
@@ -11,19 +12,19 @@ use rand::rand_core::TryRngCore;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL_ENGINE;
 use base64::Engine;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct CreateApiKeyRequest {
     pub environment_id: Option<Uuid>
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct CreateApiKeyResponse {
     pub id: Uuid,
     pub key: String,
     pub status: String
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ApiKeyInfo {
     pub id: Uuid,
     pub business_id: Uuid,

@@ -4,6 +4,7 @@ mod config;
 mod db;
 mod error;
 mod routes;
+mod openapi;
 mod auth;
 mod grpc;
 mod grpc_server;
@@ -192,6 +193,11 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("🚀 Users service started successfully");
     tracing::info!("  HTTP: http://{}", addr);
+    tracing::info!(
+        "  Swagger UI: http://127.0.0.1:{}/swagger-ui/  (OpenAPI: http://127.0.0.1:{}/api-docs/openapi.json)",
+        addr.port(),
+        addr.port()
+    );
     tracing::info!("  gRPC: {}", grpc_addr);
     tracing::info!("Available endpoints:");
     tracing::info!("  GET  /health");

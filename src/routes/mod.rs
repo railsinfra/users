@@ -9,6 +9,8 @@ pub mod beta;
 mod rate_limit;
 
 use axum::{Router, routing::{post, get}};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 use axum::body::Body;
 use axum::http::Request;
 use axum::middleware::{from_fn, Next};
@@ -17,6 +19,7 @@ use crate::db::Db;
 use crate::grpc::GrpcClients;
 use crate::error::AppError;
 use crate::email::EmailService;
+use crate::openapi::ApiDoc;
 use rate_limit::{extract_client_key, RateLimitConfig, RateLimiter};
 use uuid::Uuid;
 use std::sync::{Arc, OnceLock};
@@ -80,6 +83,9 @@ pub fn register_routes(
     public
         .merge(auth_limited)
         .merge(protected)
+        .merge(Router::<AppState>::from(
+            SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()),
+        ))
         .layer(from_fn(correlation_id_middleware))
         .layer(from_fn(internal_caller_middleware))
         .with_state(state)

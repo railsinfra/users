@@ -4,6 +4,7 @@ use chrono::{Utc, Duration};
 use crate::error::{AppError, DUPLICATE_EMAIL_MESSAGE};
 use crate::routes::{AppState, user};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::{SaltString, rand_core::OsRng};
 use argon2::password_hash::rand_core::RngCore;
@@ -12,7 +13,7 @@ use base64::engine::Engine;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct RegisterBusinessRequest {
     pub name: String,
     pub website: Option<String>,
@@ -22,7 +23,7 @@ pub struct RegisterBusinessRequest {
     pub admin_password: String
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RegisterBusinessResponse {
     pub business_id: Uuid,
     pub admin_user_id: Uuid,
@@ -34,7 +35,7 @@ pub struct RegisterBusinessResponse {
     pub selected_environment_id: Uuid,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct EnvironmentInfo {
     pub id: Uuid,
     pub r#type: String

@@ -7,6 +7,7 @@ use argon2::password_hash::{rand_core::{OsRng, RngCore}, SaltString};
 use chrono::{Utc, Duration};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use sqlx::Row;
 use sha2::{Sha256, Digest};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_ENGINE;
@@ -15,23 +16,23 @@ use base64::Engine;
 use crate::error::AppError;
 use crate::routes::{AppState, user};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct RequestPasswordResetRequest {
     pub email: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct RequestPasswordResetResponse {
     pub message: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ResetPasswordRequest {
     pub token: String,
     pub new_password: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ResetPasswordResponse {
     pub message: String,
 }
