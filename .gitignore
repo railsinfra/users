@@ -1,5 +1,8 @@
 .env/
 .env
 .env.*
+!.env.dev.example
+!.env.prod.example
+!.env.staging.example
 /target
 .DS_Store
