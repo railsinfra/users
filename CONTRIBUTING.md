@@ -6,7 +6,7 @@ Thanks for contributing to `users`.
 
 1. Fork and clone the repository.
 2. Copy environment templates and configure local values:
-   - `cp .env.dev.example .env`
+   - `cp .env.example .env`
    - Set `JWT_SECRET` and `API_KEY_HASH_SECRET` to long random values (see README).
 3. Start required local dependencies (PostgreSQL, Rust toolchain).
 4. Run tests before opening a PR.

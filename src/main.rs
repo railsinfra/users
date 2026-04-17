@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
 
     let jwt_secret = std::env::var("JWT_SECRET")
         .map_err(|_| anyhow::anyhow!(
-            "JWT_SECRET is required. Set a long random value (for example `openssl rand -hex 32`). See .env.dev.example."
+            "JWT_SECRET is required. Set a long random value (for example `openssl rand -hex 32`). See .env.example."
         ))?;
     let jwt_secret = jwt_secret.trim();
     if jwt_secret.is_empty() {
@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
 
     let api_key_hash_secret = std::env::var("API_KEY_HASH_SECRET")
         .map_err(|_| anyhow::anyhow!(
-            "API_KEY_HASH_SECRET is required. Set a long random value distinct from JWT_SECRET. See .env.dev.example."
+            "API_KEY_HASH_SECRET is required. Set a long random value distinct from JWT_SECRET. See .env.example."
         ))?;
     let api_key_hash_secret = api_key_hash_secret.trim();
     if api_key_hash_secret.is_empty() {

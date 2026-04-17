@@ -86,10 +86,10 @@ Protobuf sources live under `proto/` (for example `users.proto`). The gRPC serve
 Use the provided example file:
 
 ```bash
-cp .env.dev.example .env
+cp .env.example .env
 ```
 
-Expected variables (non-exhaustive; see `.env.dev.example` for the full set):
+Expected variables (non-exhaustive; see `.env.example` for the full set):
 
 - `DATABASE_URL` - Postgres connection string
 - `SERVER_ADDR` or `HOST` + `PORT` - HTTP bind (defaults include `0.0.0.0:8080`)
