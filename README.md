@@ -2,13 +2,18 @@
 
 ## Open Source Project
 
-This service lives in the Rails Financial API monorepo.
+This repository is published as its own service. Governance files live at the repo root:
 
-- Monorepo overview: [`README.md`](../../../README.md)
-- Contributing: [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)
-- Code of conduct: [`CODE_OF_CONDUCT.md`](../../../CODE_OF_CONDUCT.md)
-- Security policy: [`SECURITY.md`](../../../SECURITY.md)
-- License: [`LICENSE`](../../../LICENSE)
+- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- License: [`LICENSE`](LICENSE)
+
+If you work from the Rails Financial API monorepo instead, the overview is at [`README.md`](../../../README.md).
+
+## Maintainer-only SQL
+
+`get_production_users.sql` is an operational helper for querying production-shaped data when you already have authorized database access. It is **not** required to run the service. Do not run it against production without your organization’s data-access policy.
 
 ## Prerequisites
 
