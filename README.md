@@ -1,311 +1,159 @@
-# Users Microservice
+# Users Microservice (Rust)
 
-Rust microservice for identity, businesses, environments, sessions, API keys, and related platform auth flows for the Rails Financial API.
-
-## Overview
-
-This service is part of the Rails Financial API open-source project and is designed for:
-
-- Business and environment provisioning with role-based users
-- JWT access and refresh sessions with secure refresh handling
-- Business-scoped API keys (hashed at rest; one-time plaintext reveal on create)
-- Optional email flows (password reset, beta notifications) via Resend
-- gRPC surface for platform services alongside the public HTTP API
-
-Core capabilities:
-
-- Business registration and admin authentication
-- User lifecycle data tied to businesses and environments
-- API key administration for server-to-server and dashboard flows
-- Rate-limited authentication-related HTTP routes
+Rust microservice for identity, businesses, environments, sessions, API keys, and platform authentication flows. This service is part of the Rails Financial API monorepo and is designed to be explicit about secrets, safe for multi-tenant workloads, and observable at the edge.
 
 ## Open Source Project
 
-This microservice is maintained as part of an open-source repository.
+This service is maintained as part of the open-source repository:
 
-- Monorepo overview: [`README.md`](../../../README.md)
+- Project overview: [`README.md`](../../../README.md)
 - Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
 - License: [`LICENSE`](LICENSE)
 
-## Technology Stack
+## What This Service Does
 
-- Rust
-- Axum (HTTP)
-- Tokio
-- Tonic (gRPC server and clients)
-- SQLx (PostgreSQL)
-- JSON Web Tokens (`jsonwebtoken`), HMAC API key hashing
-- Serde, UUID, Chrono, Tracing
-- Optional Sentry and Resend integrations
+- Registers businesses and environments and ties users to those tenants
+- Issues and refreshes JWT access sessions with refresh-token lifecycle controls
+- Issues business-scoped API keys (hashed at rest; plaintext shown once on create)
+- Protects sensitive HTTP entrypoints with optional internal service tokens
+- Rate-limits authentication-tier HTTP routes by client identity behind trusted proxies
+- Exposes a gRPC server for platform services alongside the public HTTP API
+- Sends optional email flows (password reset, beta notifications) when Resend is configured
 
-## Architecture
+## Architecture Overview
 
-### Service design
+The service follows a conventional Rust layout:
 
-- Stateless HTTP API using REST conventions under `/api/v1`
-- gRPC server on `GRPC_PORT` (default `50051`) for internal callers; gRPC client to Accounts for downstream calls
-- Modules under `src/routes/` for HTTP handlers, plus `config`, `db`, `auth`, `grpc`, `email`, and shared error types
-- Layered middleware: correlation ID for `/api/*`, optional internal token gate on sensitive routes, client-key rate limits on auth-tier routes
+- `src/main.rs` - process entry, tracing/Sentry wiring, migration run, HTTP + gRPC servers
+- `src/routes/` - Axum HTTP handlers (`business`, `auth`, `apikey`, `user`, `beta`, `password_reset`, `health`)
+- `src/auth.rs` - JWT and API-key extraction and validation
+- `src/grpc.rs` / `src/grpc_server.rs` - gRPC client to Accounts and users gRPC surface
+- `src/config.rs`, `src/db.rs`, `src/email.rs`, `src/error.rs` - configuration, SQLx pool, mail, errors
+- `migrations/` - SQLx migrations applied at startup
+- `proto/` - protobuf definitions consumed by tonic
 
-### Performance and reliability
+## API Surface
 
-- Async I/O and pooled PostgreSQL access
-- Indexed paths for common lookups (see migrations)
-- Migrations run at startup; certain version drift scenarios are logged and skipped when connecting to shared or legacy databases (see below)
+### HTTP endpoints
 
-## Data Model
+Base URL defaults to `http://localhost:8080` (see `SERVER_ADDR` or `HOST` + `PORT`).
 
-Core tables (evolving with migrations):
+Public and session routes:
 
-- `businesses`, `environments`
-- `users`, `user_sessions`
-- `api_keys` (hashed key material; status and revocation timestamps)
-- `password_reset_tokens`, `beta_applications` (and related constraints)
+- `GET /health` - health check
+- `POST /api/v1/business/register` - register a business
+- `POST /api/v1/auth/refresh` - refresh access token
+- `POST /api/v1/auth/revoke` - revoke refresh token
 
-Schema intent:
+Auth-tier (rate-limited) routes:
 
-- UUID primary keys and foreign keys across tenant boundaries
-- Enumerated string statuses where appropriate
-- Audit timestamps on core entities
-- Unique constraints where required (for example email deduplication rules per migration set)
+- `POST /api/v1/auth/login` - login and issue tokens
+- `POST /api/v1/auth/password-reset/request` - request password reset email (requires Resend)
+- `POST /api/v1/auth/password-reset/reset` - complete password reset
+- `POST /api/v1/beta/apply` - beta application intake
 
-## HTTP API Surface
+Protected (JWT or active API key) routes:
 
-### Correlation ID
+- `POST /api/v1/api-keys` - create API key (plaintext returned once)
+- `GET /api/v1/api-keys` - list API keys for the environment
+- `POST /api/v1/api-keys/:api_key_id/revoke` - revoke an API key
+- `GET /api/v1/me` - current user, business, and environment summary
 
-For `/api/...` routes, include:
+### Auth behavior
 
-- `x-correlation-id: <string>`
+- All `/api/...` routes participate in correlation ID handling: send `x-correlation-id` or receive one on the response.
+- Authenticated routes resolve tenant context using `x-environment-id` (UUID) and/or `x-environment` (`sandbox` / `production`) depending on the handler.
+- Protected routes accept `Authorization: Bearer <jwt>` or `x-api-key: <plaintext>`. API keys are verified with `API_KEY_HASH_SECRET` (must match every validating replica).
+- When `INTERNAL_SERVICE_TOKEN_ALLOWLIST` is non-empty, `POST /api/v1/auth/login` and `POST /api/v1/business/register` require `x-internal-service-token` matching the allowlist. In `ENVIRONMENT=production`, the allowlist must be non-empty at startup.
+- Auth-tier routes honor `USERS_TRUSTED_PROXY_IPS` (comma-separated IPs) when deriving client keys for rate limiting, plus `USERS_AUTH_RATE_LIMIT_WINDOW_SECONDS` and `USERS_AUTH_RATE_LIMIT_MAX`.
 
-If omitted, the service may generate one and attach it to the response.
+### gRPC methods
 
-### Environment selection
-
-Authenticated routes that resolve tenant context typically require one of:
-
-- `x-environment-id: <uuid>` (preferred), or
-- `x-environment: <string>` (for example sandbox vs production labels), depending on the handler
-
-### Authentication
-
-Protected routes accept either:
-
-- `authorization: Bearer <jwt>` (dashboard-style usage), or
-- `x-api-key: <plaintext key>` (server-to-server; key is verified via `API_KEY_HASH_SECRET`)
-
-API keys are business-scoped and treated as highly privileged for the owning business. Use the same `API_KEY_HASH_SECRET` on every replica that verifies keys.
-
-### Sensitive routes and internal tokens
-
-When `INTERNAL_SERVICE_TOKEN_ALLOWLIST` is non-empty, these routes require a matching `x-internal-service-token`:
-
-- `POST /api/v1/auth/login`
-- `POST /api/v1/business/register`
-
-If the allowlist env var is unset or empty, that check is disabled (use explicit allowlists in shared environments and **require** a non-empty allowlist in `ENVIRONMENT=production` at process startup).
-
-### Auth-tier rate limits
-
-Login, password reset, beta apply, and related routes behind `auth_rate_limit_middleware` share a per-client-key limiter. Tune with:
-
-- `USERS_AUTH_RATE_LIMIT_WINDOW_SECONDS` (default `60`)
-- `USERS_AUTH_RATE_LIMIT_MAX` (default `10`)
-
-Optional trusted proxy list for client IP extraction:
-
-- `USERS_TRUSTED_PROXY_IPS` — comma-separated IPs that may terminate `x-forwarded-for`
-
-### Endpoints
-
-**Health**
-
-- `GET /health` — Liveness / readiness style check
-
-**Business**
-
-- `POST /api/v1/business/register` — Register a business (internal token when allowlist configured)
-
-**Auth**
-
-- `POST /api/v1/auth/login` — Issue tokens (internal token when allowlist configured)
-- `POST /api/v1/auth/refresh` — Refresh access token
-- `POST /api/v1/auth/revoke` — Revoke refresh token
-- `POST /api/v1/auth/password-reset/request` — Request password reset email (when Resend configured)
-- `POST /api/v1/auth/password-reset/reset` — Complete password reset
-
-**Beta**
-
-- `POST /api/v1/beta/apply` — Beta application intake
-
-**API keys (JWT or active API key)**
-
-- `POST /api/v1/api-keys` — Create key; plaintext returned once
-- `GET /api/v1/api-keys` — List keys for the environment
-- `POST /api/v1/api-keys/:api_key_id/revoke` — Revoke a key
-
-**Profile**
-
-- `GET /api/v1/me` — Current user, business, and environment summary
-
-### API key lifecycle notes
-
-- Plaintext API keys are never stored; only a hash is persisted.
-- Revoked keys remain rows with `status='revoked'` and `revoked_at` set.
-- Rotate by creating a new key and revoking the old one if a secret is lost.
-
-## Project Layout
-
-```text
-src/api/users/
-├── src/
-│   ├── main.rs
-│   ├── config.rs
-│   ├── db.rs
-│   ├── auth.rs
-│   ├── grpc.rs
-│   ├── grpc_server.rs
-│   ├── email.rs
-│   ├── error.rs
-│   └── routes/
-├── migrations/
-├── proto/
-├── Cargo.toml
-└── README.md
-```
+Protobuf sources live under `proto/` (for example `users.proto`). The gRPC server listens on `GRPC_PORT` (default `50051`). Regenerate Rust stubs after proto changes using the project’s `build.rs` workflow.
 
 ## Local Setup
 
 ### Prerequisites
 
 - Rust stable toolchain
-- PostgreSQL (local Docker or managed provider)
-- SQLx CLI for manual migrations if you prefer not relying on startup migration only: `cargo install sqlx-cli`
+- PostgreSQL 14+ (local or managed)
+- Optional: `cargo install sqlx-cli` if you prefer running migrations separately from app startup
 
-### PostgreSQL (example)
+### Environment configuration
 
-```bash
-# macOS
-brew install postgresql@14
-brew services start postgresql@14
-
-# Or Docker
-docker run --name postgres-users -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=users -p 5432:5432 -d postgres:14
-```
-
-Create the database and apply migrations:
+Use the provided example file:
 
 ```bash
-createdb users
-# Or: docker exec -i postgres-users psql -U postgres -c "CREATE DATABASE users;"
-
-export DATABASE_URL="postgresql://localhost:5432/users"
-sqlx migrate run
-
-# Or run the initial SQL directly:
-# psql "$DATABASE_URL" < migrations/20260119000100_init_users_service.sql
+cp .env.dev.example .env
 ```
 
-### Environment variables
+Expected variables (non-exhaustive; see `.env.dev.example` for the full set):
 
-Create `.env` in `src/api/users/` (see also [`.env.dev.example`](.env.dev.example)):
+- `DATABASE_URL` - Postgres connection string
+- `SERVER_ADDR` or `HOST` + `PORT` - HTTP bind (defaults include `0.0.0.0:8080`)
+- `GRPC_PORT` - gRPC server port (default `50051`)
+- `ACCOUNTS_GRPC_URL` - Accounts service gRPC endpoint for downstream calls
+- `RUST_LOG` - tracing filter (for example `info`)
+- `ENVIRONMENT` - logical environment name (`development`, `production`, …)
+- `JWT_SECRET` - required signing secret for JWTs
+- `API_KEY_HASH_SECRET` - required secret for API key hashing (distinct from `JWT_SECRET`)
+- `INTERNAL_SERVICE_TOKEN_ALLOWLIST` - optional comma-separated tokens; required non-empty in production
+- `SENTRY_DSN` - optional error reporting DSN
+- Resend-related variables - optional; password reset and beta mail are skipped without `RESEND_API_KEY`
 
-```env
-# PostgreSQL — adjust user, password, host, port, database, sslmode for your environment.
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=require
+For local development, use non-production credentials and local databases only.
 
-# HTTP bind: use SERVER_ADDR or HOST + PORT
-SERVER_ADDR=0.0.0.0:8080
-# HOST=0.0.0.0
-# PORT=8080
-
-GRPC_PORT=50051
-ACCOUNTS_GRPC_URL=http://127.0.0.1:50052
-
-RUST_LOG=info
-ENVIRONMENT=development
-
-# Required at startup (no insecure defaults). Example: openssl rand -hex 32
-JWT_SECRET=replace_me
-API_KEY_HASH_SECRET=replace_me_different_from_jwt
-
-# Comma-separated. In production this must be non-empty or the process exits at startup.
-INTERNAL_SERVICE_TOKEN_ALLOWLIST=
-
-SENTRY_DSN=
-
-FRONTEND_BASE_URL=http://localhost:5173
-
-# Resend (password reset, beta mail). Optional in dev; password reset emails are skipped without a key.
-RESEND_API_KEY=
-RESEND_FROM_EMAIL=noreply@example.com
-RESEND_FROM_NAME=Rails Financial Infrastructure
-RESEND_BASE_URL=https://api.resend.com
-RESEND_BETA_NOTIFICATION_EMAIL=beta@example.com
-```
-
-### Migration startup behavior
-
-The service runs embedded SQLx migrations on boot. Some migration errors (for example missing or mismatched versions on shared databases) are logged and ignored so operators can still start against legacy schemas. Prefer a dedicated database and clean migration history for local development and new deployments.
-
-### Build and run
+If your PostgreSQL database does not exist yet, create one before running migrations:
 
 ```bash
-cargo build --release
-cargo run --release
+createdb users || true
 ```
 
-Default HTTP URL: `http://localhost:8080` (or the host/port you configured).
+### Install and run
 
-## Development Workflow
+```bash
+export DATABASE_URL="postgresql://localhost:5432/users"   # adjust to your DB
+sqlx migrate run    # optional if you rely on startup migrations only
+cargo build
+cargo run
+```
 
-- Run tests: `cargo test`
-- Format: `cargo fmt`
-- Lint: `cargo clippy`
-- Add migration: `sqlx migrate add <name>`
+The service also runs embedded SQLx migrations on boot. Some migration version drift on shared databases is logged and ignored; prefer a clean dedicated database for local work.
 
-## Performance Targets
+## Testing
 
-Throughput and latency goals depend on deployment shape (CPU, connection pool size, and PostgreSQL tier). Size connection pools and instance counts against expected login, refresh, and API-key verification rates.
+Run the Rust tests from this directory:
 
-## Security and Compliance Baseline
+```bash
+cargo test
+```
 
-- Required secrets at startup (`JWT_SECRET`, `API_KEY_HASH_SECRET`); no insecure defaults
-- Production requires non-empty `INTERNAL_SERVICE_TOKEN_ALLOWLIST` for sensitive entrypoints
-- Parameterized SQL, structured logging, and rate limiting on sensitive HTTP routes
-- API keys stored as hashes; scrub sensitive headers in Sentry `before_send` when DSN is configured
+Some integration tests require `DATABASE_URL` and will skip when it is unset. Set `JWT_SECRET` and `API_KEY_HASH_SECRET` when running tests that exercise crypto paths in CI or locally.
+
+When changing auth, routing, or migration behavior, add or update tests in the same change.
+
+## Operational Notes
+
+- API key plaintext is never stored; only a derived hash is persisted. Rotate by creating a new key and revoking the old one.
+- Revoked API keys remain rows with `status='revoked'` and `revoked_at` set.
+- `get_production_users.sql` is a maintainer-only operational helper, not required to run the service; do not run it against production without your organization’s data-access policy.
+- Core relational tables include `businesses`, `environments`, `users`, `user_sessions`, `api_keys`, and tables supporting password reset and beta applications (see `migrations/`).
 
 ## Observability and Error Tracking
 
-- Structured tracing on request lifecycle (correlation ID, method, path, status, duration).
-- Optional Sentry for unexpected failures; avoid treating validation or expected business-rule outcomes as crash-level events.
-- Include service, environment, route, and correlation identifiers in telemetry; never log secrets or raw API keys.
+- Emit structured logs for HTTP request lifecycle (correlation ID, method, path, status, duration).
+- Capture unexpected system failures with Sentry when `SENTRY_DSN` is set; scrub `Authorization`, `X-Internal-Service-Token`, and `X-API-Key` in `before_send`.
+- Include actionable context (service, environment, route, correlation ID), never secrets or raw API keys.
+- Keep monitoring behavior consistent with repo-wide observability guidance.
 
-## Maintainer-only SQL
+## Deployment
 
-`get_production_users.sql` is an operational helper for querying production-shaped data when you already have authorized database access. It is **not** required to run the service. Do not run it against production without your organization’s data-access policy.
+- Service deployment config is in `railway.toml`.
+- For production usage, ensure secure env var management, strict secret handling, and a non-empty `INTERNAL_SERVICE_TOKEN_ALLOWLIST`.
+- Keep migrations and deployment changes in sync with this service release.
 
-## Troubleshooting
+## Security Reporting
 
-- **Startup hangs or DB errors:** confirm PostgreSQL is reachable (`pg_isready`, `psql`), and that `DATABASE_URL` points at an existing database.
-- **Port in use:** change `SERVER_ADDR` / `PORT` or stop the conflicting process (`lsof -i :8080`).
-- **Verbose diagnostics:** `RUST_LOG=debug cargo run`
-
-### Quick manual check
-
-```bash
-curl http://localhost:8080/api/v1/business/register \
-  -H "x-correlation-id: local-test-1" \
-  -H "x-internal-service-token: replace_me" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test Business","admin_email":"admin@test.com","admin_password":"password123"}'
-```
-
-(Adjust headers to match your `INTERNAL_SERVICE_TOKEN_ALLOWLIST` when enforcement is enabled.)
-
-## Open Questions
-
-- Long-term split between HTTP and gRPC for user provisioning and SDK-facing flows
-- Hardening and policy for `INTERNAL_SERVICE_TOKEN_ALLOWLIST` rotation across services
-- Deeper integration patterns with Accounts/Ledger for organization and money-movement workflows
+Please report vulnerabilities privately via [`SECURITY.md`](SECURITY.md). Do not open public issues for security disclosures.
