@@ -25,6 +25,8 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
+    /// Accounts gRPC client; reserved for HTTP handlers that call Accounts (not wired yet).
+    #[allow(dead_code)]
     pub grpc: GrpcClients,
     pub email: Option<EmailService>,
     /// JWT signing/verification secret (never log).

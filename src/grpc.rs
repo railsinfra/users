@@ -9,6 +9,7 @@ use proto::accounts_service_client::AccountsServiceClient;
 
 #[derive(Clone)]
 pub struct GrpcClients {
+    #[allow(dead_code)]
     pub(crate) accounts_client: Option<AccountsServiceClient<Channel>>,
 }
 

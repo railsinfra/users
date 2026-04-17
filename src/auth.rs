@@ -19,12 +19,14 @@ pub const ENVIRONMENT_HEADER: &str = "X-Environment";
 #[derive(Clone, Debug)]
 pub struct AuthContext {
     pub user_id: Option<Uuid>,
+    #[allow(dead_code)]
     pub api_key_id: Option<Uuid>,
     pub business_id: Uuid,
     pub environment_id: Uuid,
 }
 
 /// SDK-only auth: API key + X-Environment. No JWT. Use for routes called exclusively by SDKs (e.g. POST/GET /api/v1/users).
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ApiKeyOnlyContext {
     pub api_key_id: Uuid,
