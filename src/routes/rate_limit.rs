@@ -48,10 +48,6 @@ impl RateLimiter {
         entry.count += 1;
         true
     }
-
-    pub fn reset(&self) {
-        self.store.lock().expect("rate limiter lock poisoned").clear();
-    }
 }
 
 pub fn extract_client_key(req: &Request<Body>, trusted_proxy_env: &str) -> String {
