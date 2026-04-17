@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
             sentry::ClientOptions {
                 release: sentry::release_name!(),
                 environment: Some(config.environment.clone().into()),
-                traces_sample_rate: 0.1, // Sample 10% of transactions for MVP
+                traces_sample_rate: 0.1, // Sample 10% of transactions (tune per environment)
                 ..Default::default()
             },
         )))

@@ -1,5 +1,15 @@
 # Users Service - Local Development Setup
 
+## Open Source Project
+
+This service lives in the Rails Financial API monorepo.
+
+- Monorepo overview: [`README.md`](../../../README.md)
+- Contributing: [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](../../../CODE_OF_CONDUCT.md)
+- Security policy: [`SECURITY.md`](../../../SECURITY.md)
+- License: [`LICENSE`](../../../LICENSE)
+
 ## Prerequisites
 
 The users service requires the following services to be running:
@@ -113,7 +123,7 @@ Protected endpoints support either:
 
 Notes:
 
-- API keys are **business-owned** and treated as **admin-level** for the MVP.
+- API keys are **business-owned** and treated as **admin-level** for the platform.
 - API keys are verified by hashing the provided key and matching it against the stored hash.
 - The hash uses `API_KEY_HASH_SECRET` (env var; default `dev_api_key_hash_secret` if unset). Use the **same** secret when creating and validating keys (e.g. same `.env` or `.env.dev` when running the service).
 
